@@ -69,42 +69,20 @@ app.get('/api/health/db', async (req, res) =>
   })
 );
 
-// Function to start the server with single-instance port selection
-const startServer = (initialPort, host) => {
+// Function to start the server with Render-compatible port binding
+const startServer = (host) => {
   return new Promise((resolve, reject) => {
-    let port = initialPort;
-    const maxPort = 3010; // Maximum port to try
-    let serverStarted = false; // Flag to prevent duplicate logs
-
-    const tryPort = () => {
-      console.log(`[${new Date().toISOString()}] ${green}Attempting to start server on port ${port}...${reset}`);
-      server.listen(port, host, () => {
-        if (!serverStarted) { // Execute logs only once
-          console.log(`[${new Date().toISOString()}] ${green}Server running on http://127.0.0.1:${port}${reset}`);
-          console.log(`[${new Date().toISOString()}] ${green}Health check: http://127.0.0.1:${port}/api/health${reset}`);
-          console.log(`[${new Date().toISOString()}] ${green}Database health: http://127.0.0.1:${port}/api/health/db${reset}`);
-          serverStarted = true; // Set flag after first execution
-          resolve();
-        }
-      }).on('error', (err) => {
-        if (err.code === 'EADDRINUSE' && port < maxPort) {
-          console.log(`[${new Date().toISOString()}] ${green}Port ${port} is in use, trying ${port + 1}...${reset}`);
-          port++;
-          server.close(() => {
-            serverStarted = false; // Reset flag for next attempt
-            tryPort();
-          }); // Close the current server and retry
-        } else if (port >= maxPort) {
-          console.error(`[${new Date().toISOString()}] No available ports in range ${initialPort}-${maxPort}`);
-          reject(new Error('No available ports'));
-        } else {
-          console.error(`[${new Date().toISOString()}] Server error:`, err.message);
-          reject(err);
-        }
-      });
-    };
-
-    tryPort();
+    const port = parseInt(process.env.PORT || '3002', 10); // Use Render's PORT or default to 3002
+    console.log(`[${new Date().toISOString()}] ${green}Attempting to start server on port ${port}...${reset}`);
+    server.listen(port, host, () => {
+      console.log(`[${new Date().toISOString()}] ${green}Server running on http://${host}:${port}${reset}`);
+      console.log(`[${new Date().toISOString()}] ${green}Health check: http://${host}:${port}/api/health${reset}`);
+      console.log(`[${new Date().toISOString()}] ${green}Database health: http://${host}:${port}/api/health/db${reset}`);
+      resolve();
+    }).on('error', (err) => {
+      console.error(`[${new Date().toISOString()}] Server error:`, err.message);
+      reject(err);
+    });
   });
 };
 
@@ -113,11 +91,9 @@ const lockFile = '.server.lock';
 // Function to clean up resources and exit the process
 const cleanup = () => {
   if (fs.existsSync(lockFile)) {
-    // Remove the lock file if it exists
     fs.unlinkSync(lockFile);
     console.log(`[${new Date().toISOString()}] ${green}Removed server lock file on exit${reset}`);
   }
-  // Close the server and exit the process
   server.close(() => process.exit(0));
 };
 
@@ -126,23 +102,19 @@ if (fs.existsSync(lockFile)) {
   console.log(`[${new Date().toISOString()}] ${green}Removing existing lock file due to restart...${reset}`);
   fs.unlinkSync(lockFile);
 }
-// Create a new lock file with the current process ID
 fs.writeFileSync(lockFile, process.pid.toString());
 
 // Register cleanup on various exit signals
-process.on('SIGINT', cleanup); // Handle Ctrl+C
-process.on('SIGTERM', cleanup); // Handle termination signal
-process.on('exit', cleanup); // Handle any process exit
+process.on('SIGINT', cleanup);
+process.on('SIGTERM', cleanup);
+process.on('exit', cleanup);
 
 // Wrapper function to handle database connection and server startup
 const connectDBWrapper = async () => {
   try {
-    // Connect to the MongoDB database
     await connectDB();
-    // Start the server on the specified port
-    await startServer(parseInt(process.env.PORT || '3002', 10), '127.0.0.1');
+    await startServer('0.0.0.0'); // Bind to 0.0.0.0 for Render
   } catch (error) {
-    // Log any errors during startup and perform cleanup
     console.error(`[${new Date().toISOString()}] Failed to start server: ${error.message}`);
     cleanup();
     process.exit(1);
@@ -162,3 +134,5 @@ process.on('uncaughtException', (err) => {
 
 // Initiate the application startup process
 connectDBWrapper();
+// Export the app for potential use in other contexts (e.g., Vercel)
+export default app;
