@@ -54,6 +54,7 @@ const sendWithRetry = async (messageOptions, retryCount = 0, maxRetries = 3) => 
 /**
  * Validate and format phone numbers for WhatsApp
  * Ensures proper WhatsApp formatting and validates number format
+ * Updated to handle international prefixes properly
  * 
  * @param {string} number - Phone number to format
  * @returns {string|null} - Formatted WhatsApp number or null if invalid
@@ -71,14 +72,17 @@ const formatPhoneNumber = (number) => {
     return cleanNumber;
   }
   
-  // Validate basic phone number format (should start with + followed by digits)
-  const phoneRegex = /^\+\d{10,15}$/;
-  if (!phoneRegex.test(cleanNumber)) {
-    logError(`Invalid phone number format: ${cleanNumber}`);
+  // Remove international prefixes (+, 00) and format for WhatsApp
+  // This handles various international number formats
+  const formattedNumber = cleanNumber.replace(/^(\+|00)/, '');
+  
+  // Basic validation - should contain only digits after prefix removal
+  if (!/^\d{10,15}$/.test(formattedNumber)) {
+    logError(`Invalid phone number format after processing: ${formattedNumber} (original: ${cleanNumber})`);
     return null;
   }
   
-  return `whatsapp:${cleanNumber}`;
+  return `whatsapp:${formattedNumber}`;
 };
 
 /**
@@ -254,11 +258,15 @@ router.post('/send-message', async (req, res) => {
 
     const newMessage = await createMessageDocument(messageData);
 
+    // Construct status callback URL with fallback
+    const apiBaseUrl = process.env.API_BASE_URL || 'https://whatsappwidget-be.onrender.com';
+    const statusCallbackUrl = `${apiBaseUrl}/webhook/status`;
+
     // Prepare Twilio message options
     const messageOptions = {
       from: fromNumber,
       to: formattedTo,
-      statusCallback: `${process.env.API_BASE_URL}/webhook/status`
+      statusCallback: statusCallbackUrl
     };
 
     // Add body if provided
@@ -416,13 +424,19 @@ router.post('/send-template', async (req, res) => {
 
     const newMessage = await createMessageDocument(messageData);
 
+    // Construct status callback URL with fallback
+    const apiBaseUrl = process.env.API_BASE_URL || 'https://whatsappwidget-be.onrender.com';
+    const statusCallbackUrl = `${apiBaseUrl}/webhook/status`;
+
     // Prepare Twilio template message options
     const messageOptions = {
       from: fromNumber,
       to: formattedTo,
       contentSid: contentSid.trim(),
-      contentVariables: validatedContentVariables,
-      statusCallback: `${process.env.API_BASE_URL}/webhook/status`
+      contentVariables: Array.isArray(validatedContentVariables) 
+        ? validatedContentVariables 
+        : Object.values(validatedContentVariables), // Convert to array if object
+      statusCallback: statusCallbackUrl
     };
 
     // Send template via Twilio with retry logic
