@@ -1,0 +1,32 @@
+{
+  "name": "node-express-api",
+  "description": "Simple api sample in Node",
+  "version": "1.0.0",
+  "private": true,
+  "main": "server.js",
+  "type": "module",
+  "scripts": {
+    "dev": "nodemon server.js",
+    "start": "node server.js"
+  },
+  "author": "Google LLC",
+  "license": "Apache-2.0",
+  "dependencies": {
+    "body-parser": "^2.2.0",
+    "cors": "^2.8.5",
+    "dotenv": "^17.2.1",
+    "express": "^4.21.2",
+    "mongoose": "^8.16.5",
+    "multer": "^2.0.2",
+    "socket.io": "^4.8.1",
+<<<<<<< HEAD
+    "twilio": "^5.8.0",
+    "uuid": "^11.1.0"
+=======
+    "twilio": "^5.8.0"
+>>>>>>> 96f2356b80696e5eb0fe620a63bf2eb7906d304f
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  }
+}
