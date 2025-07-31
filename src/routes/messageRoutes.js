@@ -342,154 +342,230 @@ router.post('/send-message', async (req, res) => {
  * - contactName: Display name for the contact
  * - fromName: Sender name (defaults to 'Salesforce User')
  */
+// router.post('/send-template', async (req, res) => {
+//   try {
+//     const { 
+//       contactId, 
+//       to, 
+//       contentSid, 
+//       contentVariables, 
+//       contactName, 
+//       fromName = 'Salesforce User' 
+//     } = req.body;
+
+//     // Input validation
+//     if (!contactId || typeof contactId !== 'string') {
+//       return res.status(400).json({ 
+//         success: false, 
+//         error: 'contactId is required and must be a string' 
+//       });
+//     }
+
+//     if (!to || typeof to !== 'string') {
+//       return res.status(400).json({ 
+//         success: false, 
+//         error: 'to is required and must be a valid phone number' 
+//       });
+//     }
+
+//     if (!contentSid || typeof contentSid !== 'string') {
+//       return res.status(400).json({ 
+//         success: false, 
+//         error: 'contentSid is required and must be a valid Twilio Content SID' 
+//       });
+//     }
+
+//     // Format and validate phone numbers
+//     const formattedTo = formatPhoneNumber(to);
+//     if (!formattedTo) {
+//       return res.status(400).json({ 
+//         success: false, 
+//         error: 'Invalid recipient phone number format. Use E.164 format (e.g., +1234567890)' 
+//       });
+//     }
+
+//     const fromNumber = formatPhoneNumber(process.env.TWILIO_FROM_NUMBER);
+//     if (!fromNumber) {
+//       logError('TWILIO_FROM_NUMBER environment variable is not configured or invalid');
+//       return res.status(500).json({ 
+//         success: false, 
+//         error: 'Server configuration error: FROM_NUMBER not configured' 
+//       });
+//     }
+
+//     // Validate contentVariables if provided
+//     let validatedContentVariables = {};
+//     if (contentVariables) {
+//       if (typeof contentVariables === 'object') {
+//         validatedContentVariables = contentVariables;
+//       } else {
+//         return res.status(400).json({ 
+//           success: false, 
+//           error: 'contentVariables must be an object or array' 
+//         });
+//       }
+//     }
+
+//     // Create initial message document
+//     const tempMessageSid = `tw_${uuidv4()}`;
+//     const messageData = {
+//       messageSid: tempMessageSid,
+//       contactId: contactId.trim(),
+//       contactName: contactName?.trim() || 'Unknown',
+//       contentSid: contentSid.trim(),
+//       contentVariables: validatedContentVariables,
+//       fromName: fromName?.trim() || 'Salesforce User',
+//       direction: 'outbound',
+//       status: 'queued',
+//       from: fromNumber,
+//       to: formattedTo,
+//       messageType: 'template'
+//     };
+
+//     const newMessage = await createMessageDocument(messageData);
+
+//     // Construct status callback URL with fallback
+//     const apiBaseUrl = process.env.API_BASE_URL || 'https://whatsappwidget-be.onrender.com';
+//     const statusCallbackUrl = `${apiBaseUrl}/webhook/status`;
+
+//     // Prepare Twilio template message options
+//     const messageOptions = {
+//       from: fromNumber,
+//       to: formattedTo,
+//       contentSid: contentSid.trim(),
+//       contentVariables: Array.isArray(validatedContentVariables) 
+//         ? validatedContentVariables 
+//         : Object.values(validatedContentVariables), // Convert to array if object
+//       statusCallback: statusCallbackUrl
+//     };
+
+//     // Send template via Twilio with retry logic
+//     logInfo(`Sending template ${contentSid} to ${formattedTo} for contact ${contactId}`);
+//     const { success, message, error } = await sendWithRetry(messageOptions);
+
+//     // Update message document based on result
+//     if (success) {
+//       await updateMessageStatus(newMessage._id, {
+//         messageSid: message.sid,
+//         status: 'sent',
+//         sentAt: new Date()
+//       });
+
+//       logInfo(`Template sent successfully: ${message.sid} to ${formattedTo}`);
+      
+//       res.status(202).json({
+//         success: true,
+//         message: 'Template sent successfully',
+//         data: { 
+//           messageId: newMessage._id,
+//           messageSid: message.sid,
+//           status: 'sent',
+//           contactId,
+//           contentSid,
+//           to: formattedTo
+//         }
+//       });
+//     } else {
+//       await updateMessageStatus(newMessage._id, {
+//         status: 'failed',
+//         errorCode: error.code || 'UNKNOWN_ERROR',
+//         errorMessage: error.message || 'Unknown error occurred',
+//         failedAt: new Date()
+//       });
+
+//       logError(`Failed to send template to ${formattedTo}: ${error.message} (Code: ${error.code})`);
+      
+//       res.status(500).json({ 
+//         success: false, 
+//         error: `Failed to send template: ${error.message}`,
+//         errorCode: error.code
+//       });
+//     }
+
+//   } catch (error) {
+//     logError('Error in send-template endpoint:', error);
+//     res.status(500).json({ 
+//       success: false, 
+//       error: 'Internal server error while sending template' 
+//     });
+//   }
+// });
+
+// src/routes/messageRoutes.js (partial update for send-template)
 router.post('/send-template', async (req, res) => {
   try {
-    const { 
-      contactId, 
-      to, 
-      contentSid, 
-      contentVariables, 
-      contactName, 
-      fromName = 'Salesforce User' 
-    } = req.body;
+    const { contactId, to, contentSid, contentVariables, contactName, fromName = 'Salesforce User' } = req.body;
 
-    // Input validation
-    if (!contactId || typeof contactId !== 'string') {
-      return res.status(400).json({ 
-        success: false, 
-        error: 'contactId is required and must be a string' 
-      });
+    if (!contactId || !to || !contentSid) {
+      return res.status(400).json({ success: false, error: 'contactId, to, and contentSid are required' });
     }
 
-    if (!to || typeof to !== 'string') {
-      return res.status(400).json({ 
-        success: false, 
-        error: 'to is required and must be a valid phone number' 
-      });
-    }
-
-    if (!contentSid || typeof contentSid !== 'string') {
-      return res.status(400).json({ 
-        success: false, 
-        error: 'contentSid is required and must be a valid Twilio Content SID' 
-      });
-    }
-
-    // Format and validate phone numbers
     const formattedTo = formatPhoneNumber(to);
     if (!formattedTo) {
-      return res.status(400).json({ 
-        success: false, 
-        error: 'Invalid recipient phone number format. Use E.164 format (e.g., +1234567890)' 
-      });
+      return res.status(400).json({ success: false, error: 'Invalid to number format' });
     }
 
     const fromNumber = formatPhoneNumber(process.env.TWILIO_FROM_NUMBER);
     if (!fromNumber) {
-      logError('TWILIO_FROM_NUMBER environment variable is not configured or invalid');
-      return res.status(500).json({ 
-        success: false, 
-        error: 'Server configuration error: FROM_NUMBER not configured' 
-      });
+      return res.status(500).json({ success: false, error: 'TWILIO_FROM_NUMBER is not configured' });
     }
 
-    // Validate contentVariables if provided
-    let validatedContentVariables = {};
-    if (contentVariables) {
-      if (typeof contentVariables === 'object') {
-        validatedContentVariables = contentVariables;
-      } else {
-        return res.status(400).json({ 
-          success: false, 
-          error: 'contentVariables must be an object or array' 
-        });
-      }
-    }
-
-    // Create initial message document
     const tempMessageSid = `tw_${uuidv4()}`;
-    const messageData = {
+    const newMessage = new Message({
       messageSid: tempMessageSid,
-      contactId: contactId.trim(),
-      contactName: contactName?.trim() || 'Unknown',
-      contentSid: contentSid.trim(),
-      contentVariables: validatedContentVariables,
-      fromName: fromName?.trim() || 'Salesforce User',
+      contactId,
+      contactName: contactName || 'Unknown',
+      contentSid,
+      contentVariables: contentVariables || {},
+      fromName,
       direction: 'outbound',
       status: 'queued',
       from: fromNumber,
       to: formattedTo,
       messageType: 'template'
-    };
+    });
+    await newMessage.save();
 
-    const newMessage = await createMessageDocument(messageData);
-
-    // Construct status callback URL with fallback
     const apiBaseUrl = process.env.API_BASE_URL || 'https://whatsappwidget-be.onrender.com';
     const statusCallbackUrl = `${apiBaseUrl}/webhook/status`;
 
-    // Prepare Twilio template message options
+    // Convert contentVariables to array if object, preserving order
+    const templateVariables = Array.isArray(contentVariables) 
+      ? contentVariables 
+      : Object.values(contentVariables || {});
+
     const messageOptions = {
       from: fromNumber,
       to: formattedTo,
-      contentSid: contentSid.trim(),
-      contentVariables: Array.isArray(validatedContentVariables) 
-        ? validatedContentVariables 
-        : Object.values(validatedContentVariables), // Convert to array if object
+      contentSid,
+      contentVariables: templateVariables,
       statusCallback: statusCallbackUrl
     };
-
-    // Send template via Twilio with retry logic
-    logInfo(`Sending template ${contentSid} to ${formattedTo} for contact ${contactId}`);
     const { success, message, error } = await sendWithRetry(messageOptions);
 
-    // Update message document based on result
     if (success) {
-      await updateMessageStatus(newMessage._id, {
-        messageSid: message.sid,
-        status: 'sent',
-        sentAt: new Date()
+      await Message.updateOne({ _id: newMessage._id }, {
+        $set: { messageSid: message.sid, status: 'sent', sentAt: new Date() }
       });
-
-      logInfo(`Template sent successfully: ${message.sid} to ${formattedTo}`);
-      
+      logInfo(`Template sent successfully: ${message.sid}`);
       res.status(202).json({
         success: true,
         message: 'Template sent successfully',
-        data: { 
-          messageId: newMessage._id,
-          messageSid: message.sid,
-          status: 'sent',
-          contactId,
-          contentSid,
-          to: formattedTo
-        }
+        data: { messageSid: message.sid, status: 'sent' }
       });
     } else {
-      await updateMessageStatus(newMessage._id, {
-        status: 'failed',
-        errorCode: error.code || 'UNKNOWN_ERROR',
-        errorMessage: error.message || 'Unknown error occurred',
-        failedAt: new Date()
+      await Message.updateOne({ _id: newMessage._id }, {
+        $set: { status: 'failed', errorCode: error.code, errorMessage: error.message, failedAt: new Date() }
       });
-
-      logError(`Failed to send template to ${formattedTo}: ${error.message} (Code: ${error.code})`);
-      
-      res.status(500).json({ 
-        success: false, 
-        error: `Failed to send template: ${error.message}`,
-        errorCode: error.code
-      });
+      logError(`Failed to send template: ${error.message} (Code: ${error.code})`);
+      res.status(500).json({ success: false, error: `Failed to send template: ${error.message}` });
     }
-
   } catch (error) {
     logError('Error in send-template endpoint:', error);
-    res.status(500).json({ 
-      success: false, 
-      error: 'Internal server error while sending template' 
-    });
+    res.status(500).json({ success: false, error: 'Internal server error while sending template' });
   }
 });
+
 
 /**
  * GET /contact/:contactId
