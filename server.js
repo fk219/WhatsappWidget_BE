@@ -21,11 +21,11 @@ const server = http.createServer(app);
 
 // Configure CORS options to allow specific origins and methods
 const corsOptions = {
-  origin: ['https://resilient-bear-otclnn-dev-ed.lightning.force.com', 'http://localhost:3000'], // Allowed origins for CORS
-  methods: ['GET', 'POST', 'PATCH', 'OPTIONS'], // Allowed HTTP methods
-  allowedHeaders: ['Content-Type', 'Authorization'], // Allowed headers
-  credentials: true, // Allow credentials (e.g., cookies) to be sent
-  optionsSuccessStatus: 204 // Return 204 for preflight OPTIONS requests
+  origin: ['https://resilient-bear-otclnn-dev-ed.lightning.force.com', 'http://localhost:3000'],
+  methods: ['GET', 'POST', 'PATCH', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: true,
+  optionsSuccessStatus: 204
 };
 
 // Apply CORS middleware to handle cross-origin requests
@@ -40,8 +40,8 @@ app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 // Initialize Socket.IO with the HTTP server and CORS configuration
 const io = new Server(server, { 
   cors: corsOptions, 
-  pingTimeout: 60000, // Timeout for inactive client connections (60 seconds)
-  pingInterval: 25000 // Interval for sending ping messages (25 seconds)
+  pingTimeout: 60000,
+  pingInterval: 25000
 });
 // Set up Socket.IO handler for real-time communication
 socketHandler(io);
@@ -70,14 +70,14 @@ app.get('/api/health/db', async (req, res) =>
 );
 
 // Function to start the server with Render-compatible port binding
-const startServer = (host) => {
+const startServer = () => {
   return new Promise((resolve, reject) => {
     const port = parseInt(process.env.PORT || '3002', 10); // Use Render's PORT or default to 3002
     console.log(`[${new Date().toISOString()}] ${green}Attempting to start server on port ${port}...${reset}`);
-    server.listen(port, host, () => {
-      console.log(`[${new Date().toISOString()}] ${green}Server running on http://${host}:${port}${reset}`);
-      console.log(`[${new Date().toISOString()}] ${green}Health check: http://${host}:${port}/api/health${reset}`);
-      console.log(`[${new Date().toISOString()}] ${green}Database health: http://${host}:${port}/api/health/db${reset}`);
+    server.listen(port, '0.0.0.0', () => {
+      console.log(`[${new Date().toISOString()}] ${green}Server running on http://0.0.0.0:${port}${reset}`);
+      console.log(`[${new Date().toISOString()}] ${green}Health check: http://0.0.0.0:${port}/api/health${reset}`);
+      console.log(`[${new Date().toISOString()}] ${green}Database health: http://0.0.0.0:${port}/api/health/db${reset}`);
       resolve();
     }).on('error', (err) => {
       console.error(`[${new Date().toISOString()}] Server error:`, err.message);
@@ -113,7 +113,7 @@ process.on('exit', cleanup);
 const connectDBWrapper = async () => {
   try {
     await connectDB();
-    await startServer('0.0.0.0'); // Bind to 0.0.0.0 for Render
+    await startServer();
   } catch (error) {
     console.error(`[${new Date().toISOString()}] Failed to start server: ${error.message}`);
     cleanup();
