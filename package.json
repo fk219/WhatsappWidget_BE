@@ -1,6 +1,6 @@
 {
-  "name": "node-express-api",
-  "description": "Simple api sample in Node",
+  "name": "whatsapp-middleware",
+  "description": "WhatsApp middleware API using Node.js and Twilio",
   "version": "1.0.0",
   "private": true,
   "main": "server.js",
@@ -9,10 +9,9 @@
     "dev": "nodemon server.js",
     "start": "node server.js"
   },
-  "author": "Google LLC",
+  "author": "Furqan Khan",
   "license": "Apache-2.0",
   "dependencies": {
-    "body-parser": "^2.2.0",
     "cors": "^2.8.5",
     "dotenv": "^17.2.1",
     "express": "^4.21.2",
@@ -21,7 +20,6 @@
     "socket.io": "^4.8.1",
     "twilio": "^5.8.0",
     "uuid": "^11.1.0"
-    "twilio": "^5.8.0"
   },
   "devDependencies": {
     "nodemon": "^3.0.1"
