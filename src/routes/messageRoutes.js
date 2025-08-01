@@ -529,16 +529,22 @@ router.post('/send-template', async (req, res) => {
     const apiBaseUrl = process.env.API_BASE_URL || 'https://whatsappwidget-be.onrender.com';
     const statusCallbackUrl = `${apiBaseUrl}/webhook/status`;
 
-    // Convert contentVariables to array if object, preserving order
-    const templateVariables = Array.isArray(contentVariables) 
-      ? contentVariables 
-      : Object.values(contentVariables || {});
+    let contentVars = {};
+    if (!contentVariables) {
+      contentVars = { "1": "696969" };
+    } else if (Array.isArray(contentVariables)) {
+      contentVariables.forEach((val, idx) => {
+        contentVars[`${idx + 1}`] = val;
+      });
+    } else if (typeof contentVariables === 'object' && contentVariables !== null) {
+      contentVars = { ...contentVariables };
+    }
 
     const messageOptions = {
       from: fromNumber,
       to: formattedTo,
       contentSid,
-      contentVariables: templateVariables,
+      contentVariables: JSON.stringify(contentVars),
       statusCallback: statusCallbackUrl
     };
     const { success, message, error } = await sendWithRetry(messageOptions);
