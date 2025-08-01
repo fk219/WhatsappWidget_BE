@@ -1,3 +1,4 @@
+
 import express from 'express';
 import twilio from 'twilio';
 import Message from '../models/Message.js';
@@ -13,10 +14,29 @@ try {
     throw new Error('Missing required Twilio environment variables: TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN');
   }
   twilioClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+  logInfo('Twilio client initialized successfully');
 } catch (error) {
   logError('Failed to initialize Twilio client:', error);
   process.exit(1); // Exit if Twilio cannot be initialized
 }
+
+/**
+ * Helper function to emit socket events safely
+ * @param {Object} io - Socket.io instance
+ * @param {string} contactId - Contact ID to emit to
+ * @param {string} event - Event name
+ * @param {Object} data - Data to emit
+ */
+const emitSocketEvent = (io, contactId, event, data) => {
+  try {
+    if (io && contactId) {
+      io.to(contactId).emit(event, data);
+      logInfo(`Socket event '${event}' emitted to contact: ${contactId}`);
+    }
+  } catch (error) {
+    logError('Error emitting socket event:', error);
+  }
+};
 
 /**
  * Helper function for retry logic with exponential backoff
@@ -82,7 +102,7 @@ const formatPhoneNumber = (number) => {
     return null;
   }
   
-  return `whatsapp:${formattedNumber}`;
+  return `whatsapp:+${formattedNumber}`;
 };
 
 /**
@@ -285,11 +305,21 @@ router.post('/send-message', async (req, res) => {
 
     // Update message document based on result
     if (success) {
-      await updateMessageStatus(newMessage._id, {
+      const updatedMessageData = {
         messageSid: message.sid,
         status: 'sent',
         sentAt: new Date()
-      });
+      };
+      
+      await updateMessageStatus(newMessage._id, updatedMessageData);
+
+      // Emit socket event for real-time updates
+        const io = req.app.get('socketio');
+        const messageForSocket = {
+          ...newMessage.toObject(),
+          ...updatedMessageData
+        };
+        emitSocketEvent(io, contactId, 'new-message', messageForSocket);
 
       logInfo(`Message sent successfully: ${message.sid} to ${formattedTo}`);
       
@@ -305,12 +335,22 @@ router.post('/send-message', async (req, res) => {
         }
       });
     } else {
-      await updateMessageStatus(newMessage._id, {
+      const errorData = {
         status: 'failed',
         errorCode: error.code || 'UNKNOWN_ERROR',
         errorMessage: error.message || 'Unknown error occurred',
         failedAt: new Date()
-      });
+      };
+      
+      await updateMessageStatus(newMessage._id, errorData);
+
+      // Emit socket event for failed message
+      const io = req.app.get('socketio');
+      const messageForSocket = {
+        ...newMessage.toObject(),
+        ...errorData
+      };
+      emitSocketEvent(io, contactId, 'message-status-update', messageForSocket);
 
       logError(`Failed to send message to ${formattedTo}: ${error.message} (Code: ${error.code})`);
       
@@ -342,193 +382,80 @@ router.post('/send-message', async (req, res) => {
  * - contactName: Display name for the contact
  * - fromName: Sender name (defaults to 'Salesforce User')
  */
-// router.post('/send-template', async (req, res) => {
-//   try {
-//     const { 
-//       contactId, 
-//       to, 
-//       contentSid, 
-//       contentVariables, 
-//       contactName, 
-//       fromName = 'Salesforce User' 
-//     } = req.body;
-
-//     // Input validation
-//     if (!contactId || typeof contactId !== 'string') {
-//       return res.status(400).json({ 
-//         success: false, 
-//         error: 'contactId is required and must be a string' 
-//       });
-//     }
-
-//     if (!to || typeof to !== 'string') {
-//       return res.status(400).json({ 
-//         success: false, 
-//         error: 'to is required and must be a valid phone number' 
-//       });
-//     }
-
-//     if (!contentSid || typeof contentSid !== 'string') {
-//       return res.status(400).json({ 
-//         success: false, 
-//         error: 'contentSid is required and must be a valid Twilio Content SID' 
-//       });
-//     }
-
-//     // Format and validate phone numbers
-//     const formattedTo = formatPhoneNumber(to);
-//     if (!formattedTo) {
-//       return res.status(400).json({ 
-//         success: false, 
-//         error: 'Invalid recipient phone number format. Use E.164 format (e.g., +1234567890)' 
-//       });
-//     }
-
-//     const fromNumber = formatPhoneNumber(process.env.TWILIO_FROM_NUMBER);
-//     if (!fromNumber) {
-//       logError('TWILIO_FROM_NUMBER environment variable is not configured or invalid');
-//       return res.status(500).json({ 
-//         success: false, 
-//         error: 'Server configuration error: FROM_NUMBER not configured' 
-//       });
-//     }
-
-//     // Validate contentVariables if provided
-//     let validatedContentVariables = {};
-//     if (contentVariables) {
-//       if (typeof contentVariables === 'object') {
-//         validatedContentVariables = contentVariables;
-//       } else {
-//         return res.status(400).json({ 
-//           success: false, 
-//           error: 'contentVariables must be an object or array' 
-//         });
-//       }
-//     }
-
-//     // Create initial message document
-//     const tempMessageSid = `tw_${uuidv4()}`;
-//     const messageData = {
-//       messageSid: tempMessageSid,
-//       contactId: contactId.trim(),
-//       contactName: contactName?.trim() || 'Unknown',
-//       contentSid: contentSid.trim(),
-//       contentVariables: validatedContentVariables,
-//       fromName: fromName?.trim() || 'Salesforce User',
-//       direction: 'outbound',
-//       status: 'queued',
-//       from: fromNumber,
-//       to: formattedTo,
-//       messageType: 'template'
-//     };
-
-//     const newMessage = await createMessageDocument(messageData);
-
-//     // Construct status callback URL with fallback
-//     const apiBaseUrl = process.env.API_BASE_URL || 'https://whatsappwidget-be.onrender.com';
-//     const statusCallbackUrl = `${apiBaseUrl}/webhook/status`;
-
-//     // Prepare Twilio template message options
-//     const messageOptions = {
-//       from: fromNumber,
-//       to: formattedTo,
-//       contentSid: contentSid.trim(),
-//       contentVariables: Array.isArray(validatedContentVariables) 
-//         ? validatedContentVariables 
-//         : Object.values(validatedContentVariables), // Convert to array if object
-//       statusCallback: statusCallbackUrl
-//     };
-
-//     // Send template via Twilio with retry logic
-//     logInfo(`Sending template ${contentSid} to ${formattedTo} for contact ${contactId}`);
-//     const { success, message, error } = await sendWithRetry(messageOptions);
-
-//     // Update message document based on result
-//     if (success) {
-//       await updateMessageStatus(newMessage._id, {
-//         messageSid: message.sid,
-//         status: 'sent',
-//         sentAt: new Date()
-//       });
-
-//       logInfo(`Template sent successfully: ${message.sid} to ${formattedTo}`);
-      
-//       res.status(202).json({
-//         success: true,
-//         message: 'Template sent successfully',
-//         data: { 
-//           messageId: newMessage._id,
-//           messageSid: message.sid,
-//           status: 'sent',
-//           contactId,
-//           contentSid,
-//           to: formattedTo
-//         }
-//       });
-//     } else {
-//       await updateMessageStatus(newMessage._id, {
-//         status: 'failed',
-//         errorCode: error.code || 'UNKNOWN_ERROR',
-//         errorMessage: error.message || 'Unknown error occurred',
-//         failedAt: new Date()
-//       });
-
-//       logError(`Failed to send template to ${formattedTo}: ${error.message} (Code: ${error.code})`);
-      
-//       res.status(500).json({ 
-//         success: false, 
-//         error: `Failed to send template: ${error.message}`,
-//         errorCode: error.code
-//       });
-//     }
-
-//   } catch (error) {
-//     logError('Error in send-template endpoint:', error);
-//     res.status(500).json({ 
-//       success: false, 
-//       error: 'Internal server error while sending template' 
-//     });
-//   }
-// });
-
-// src/routes/messageRoutes.js (partial update for send-template)
 router.post('/send-template', async (req, res) => {
   try {
-    const { contactId, to, contentSid, contentVariables, contactName, fromName = 'Salesforce User' } = req.body;
+    const { 
+      contactId, 
+      to, 
+      contentSid, 
+      contentVariables, 
+      contactName, 
+      fromName = 'Salesforce User' 
+    } = req.body;
 
-    if (!contactId || !to || !contentSid) {
-      return res.status(400).json({ success: false, error: 'contactId, to, and contentSid are required' });
+    // Input validation
+    if (!contactId || typeof contactId !== 'string') {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'contactId is required and must be a string' 
+      });
     }
 
+    if (!to || typeof to !== 'string') {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'to is required and must be a valid phone number' 
+      });
+    }
+
+    if (!contentSid || typeof contentSid !== 'string') {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'contentSid is required and must be a valid Twilio Content SID' 
+      });
+    }
+
+    // Format and validate phone numbers
     const formattedTo = formatPhoneNumber(to);
     if (!formattedTo) {
-      return res.status(400).json({ success: false, error: 'Invalid to number format' });
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Invalid recipient phone number format. Use E.164 format (e.g., +1234567890)' 
+      });
     }
 
     const fromNumber = formatPhoneNumber(process.env.TWILIO_FROM_NUMBER);
     if (!fromNumber) {
-      return res.status(500).json({ success: false, error: 'TWILIO_FROM_NUMBER is not configured' });
+      logError('TWILIO_FROM_NUMBER environment variable is not configured or invalid');
+      return res.status(500).json({ 
+        success: false, 
+        error: 'Server configuration error: FROM_NUMBER not configured' 
+      });
     }
 
+    // Create initial message document
     const tempMessageSid = `tw_${uuidv4()}`;
-    const newMessage = new Message({
+    const messageData = {
       messageSid: tempMessageSid,
-      contactId,
-      contactName: contactName || 'Unknown',
-      contentSid,
+      contactId: contactId.trim(),
+      contactName: contactName?.trim() || 'Unknown',
+      contentSid: contentSid.trim(),
       contentVariables: contentVariables || {},
-      fromName,
+      fromName: fromName?.trim() || 'Salesforce User',
       direction: 'outbound',
       status: 'queued',
       from: fromNumber,
       to: formattedTo,
       messageType: 'template'
-    });
-    await newMessage.save();
+    };
 
+    const newMessage = await createMessageDocument(messageData);
+
+    // Construct status callback URL with fallback
     const apiBaseUrl = process.env.API_BASE_URL || 'https://whatsappwidget-be.onrender.com';
     const statusCallbackUrl = `${apiBaseUrl}/webhook/status`;
 
+    // Format content variables for Twilio
     let contentVars = {};
     if (!contentVariables) {
       contentVars = { "1": "696969" };
@@ -540,46 +467,107 @@ router.post('/send-template', async (req, res) => {
       contentVars = { ...contentVariables };
     }
 
+    // Prepare Twilio template message options
     const messageOptions = {
       from: fromNumber,
       to: formattedTo,
-      contentSid,
+      contentSid: contentSid.trim(),
       contentVariables: JSON.stringify(contentVars),
       statusCallback: statusCallbackUrl
     };
+
+    // Send template via Twilio with retry logic
+    logInfo(`Sending template ${contentSid} to ${formattedTo} for contact ${contactId}`);
     const { success, message, error } = await sendWithRetry(messageOptions);
 
+    // Update message document based on result
     if (success) {
-      // Fetch the actual message body from Twilio
-      const fetchedMessage = await twilioClient.messages(message.sid).fetch();
-
-      await Message.updateOne({ _id: newMessage._id }, {
-        $set: { 
-          messageSid: message.sid, 
-          status: 'sent', 
+      try {
+        // Fetch the actual message body from Twilio
+        const fetchedMessage = await twilioClient.messages(message.sid).fetch();
+        
+        const updatedMessageData = {
+          messageSid: message.sid,
+          status: 'sent',
           sentAt: new Date(),
           message: fetchedMessage.body || ''
-        }
-      });
-      logInfo(`Template sent successfully: ${message.sid}`);
-      res.status(202).json({
-        success: true,
-        message: 'Template sent successfully',
-        data: { messageSid: message.sid, status: 'sent' }
-      });
+        };
+        
+        await updateMessageStatus(newMessage._id, updatedMessageData);
+
+        // Emit socket event for real-time updates
+        const io = req.app.get('socketio');
+        const messageForSocket = {
+          ...newMessage.toObject(),
+          ...updatedMessageData
+        };
+        emitSocketEvent(io, contactId, 'new-message', messageForSocket);
+
+        logInfo(`Template sent successfully: ${message.sid} to ${formattedTo}`);
+        
+        res.status(202).json({
+          success: true,
+          message: 'Template sent successfully',
+          data: { 
+            messageId: newMessage._id,
+            messageSid: message.sid,
+            status: 'sent',
+            contactId,
+            contentSid,
+            to: formattedTo
+          }
+        });
+      } catch (fetchError) {
+        logError('Error fetching message details from Twilio:', fetchError);
+        // Still return success as the message was sent
+        res.status(202).json({
+          success: true,
+          message: 'Template sent successfully',
+          data: { 
+            messageId: newMessage._id,
+            messageSid: message.sid,
+            status: 'sent',
+            contactId,
+            contentSid,
+            to: formattedTo
+          }
+        });
+      }
     } else {
-      await Message.updateOne({ _id: newMessage._id }, {
-        $set: { status: 'failed', errorCode: error.code, errorMessage: error.message, failedAt: new Date() }
+      const errorData = {
+        status: 'failed',
+        errorCode: error.code || 'UNKNOWN_ERROR',
+        errorMessage: error.message || 'Unknown error occurred',
+        failedAt: new Date()
+      };
+      
+      await updateMessageStatus(newMessage._id, errorData);
+
+      // Emit socket event for failed template
+      const io = req.app.get('socketio');
+      const messageForSocket = {
+        ...newMessage.toObject(),
+        ...errorData
+      };
+      emitSocketEvent(io, contactId, 'message-status-update', messageForSocket);
+
+      logError(`Failed to send template to ${formattedTo}: ${error.message} (Code: ${error.code})`);
+      
+      res.status(500).json({ 
+        success: false, 
+        error: `Failed to send template: ${error.message}`,
+        errorCode: error.code
       });
-      logError(`Failed to send template: ${error.message} (Code: ${error.code})`);
-      res.status(500).json({ success: false, error: `Failed to send template: ${error.message}` });
     }
+
   } catch (error) {
     logError('Error in send-template endpoint:', error);
-    res.status(500).json({ success: false, error: 'Internal server error while sending template' });
+    res.status(500).json({ 
+      success: false, 
+      error: 'Internal server error while sending template' 
+    });
   }
 });
-
 
 /**
  * GET /contact/:contactId
@@ -604,6 +592,18 @@ router.get('/contact/:contactId', async (req, res) => {
     }).sort({ timestamp: -1 });
 
     if (contactMessage) {
+      // Get unread message count
+      const unreadCount = await Message.countDocuments({ 
+        contactId: contactId.trim(),
+        direction: 'inbound',
+        isRead: { $ne: true }
+      });
+
+      // Get total message count
+      const totalMessageCount = await Message.countDocuments({ 
+        contactId: contactId.trim() 
+      });
+
       logInfo(`Contact found: ${contactId}`);
       return res.json({
         success: true,
@@ -612,7 +612,14 @@ router.get('/contact/:contactId', async (req, res) => {
           name: contactMessage.contactName || contactMessage.fromName || 'Unknown Contact',
           phone: contactMessage.direction === 'inbound' ? contactMessage.from : contactMessage.to,
           lastMessageDate: contactMessage.timestamp,
-          messageCount: await Message.countDocuments({ contactId: contactId.trim() })
+          messageCount: totalMessageCount,
+          unreadCount,
+          lastMessage: {
+            text: contactMessage.message,
+            direction: contactMessage.direction,
+            timestamp: contactMessage.timestamp,
+            status: contactMessage.status
+          }
         }
       });
     }
@@ -628,6 +635,154 @@ router.get('/contact/:contactId', async (req, res) => {
     res.status(500).json({ 
       success: false, 
       error: 'Failed to fetch contact details' 
+    });
+  }
+});
+
+/**
+ * GET /contacts
+ * Get all contacts with their latest message info
+ * Query parameters:
+ * - page: Page number (default: 1)
+ * - limit: Number of contacts per page (default: 20, max: 100)
+ * - search: Search term for contact name or phone number
+ */
+router.get('/contacts', async (req, res) => {
+  try {
+    const { page = 1, limit = 20, search } = req.query;
+    
+    // Input validation
+    const pageNum = parseInt(page);
+    const limitNum = Math.min(parseInt(limit), 100);
+
+    if (pageNum < 1 || limitNum < 1) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Page and limit must be positive integers' 
+      });
+    }
+
+    // Build aggregation pipeline
+    const pipeline = [
+      {
+        $sort: { timestamp: -1 }
+      },
+      {
+        $group: {
+          _id: '$contactId',
+          latestMessage: { $first: '$$ROOT' },
+          messageCount: { $sum: 1 },
+          unreadCount: {
+            $sum: {
+              $cond: [
+                { 
+                  $and: [
+                    { $eq: ['$direction', 'inbound'] },
+                    { $ne: ['$isRead', true] }
+                  ]
+                },
+                1,
+                0
+              ]
+            }
+          }
+        }
+      }
+    ];
+
+    // Add search filter if provided
+    if (search && search.trim()) {
+      const searchRegex = new RegExp(search.trim(), 'i');
+      pipeline.push({
+        $match: {
+          $or: [
+            { 'latestMessage.contactName': { $regex: searchRegex } },
+            { 'latestMessage.fromName': { $regex: searchRegex } },
+            { 'latestMessage.from': { $regex: searchRegex } },
+            { 'latestMessage.to': { $regex: searchRegex } }
+          ]
+        }
+      });
+    }
+
+    // Add pagination
+    const skip = (pageNum - 1) * limitNum;
+    pipeline.push(
+      { $sort: { 'latestMessage.timestamp': -1 } },
+      { $skip: skip },
+      { $limit: limitNum }
+    );
+
+    const contacts = await Message.aggregate(pipeline);
+
+    // Get total count for pagination
+    const countPipeline = [
+      {
+        $group: {
+          _id: '$contactId',
+          latestMessage: { $first: '$$ROOT' }
+        }
+      }
+    ];
+
+    if (search && search.trim()) {
+      const searchRegex = new RegExp(search.trim(), 'i');
+      countPipeline.push({
+        $match: {
+          $or: [
+            { 'latestMessage.contactName': { $regex: searchRegex } },
+            { 'latestMessage.fromName': { $regex: searchRegex } },
+            { 'latestMessage.from': { $regex: searchRegex } },
+            { 'latestMessage.to': { $regex: searchRegex } }
+          ]
+        }
+      });
+    }
+
+    const totalContacts = await Message.aggregate([
+      ...countPipeline,
+      { $count: 'total' }
+    ]);
+
+    const total = totalContacts.length > 0 ? totalContacts[0].total : 0;
+    const totalPages = Math.ceil(total / limitNum);
+
+    // Format response
+    const formattedContacts = contacts.map(contact => ({
+      contactId: contact._id,
+      name: contact.latestMessage.contactName || contact.latestMessage.fromName || 'Unknown Contact',
+      phone: contact.latestMessage.direction === 'inbound' ? contact.latestMessage.from : contact.latestMessage.to,
+      lastMessageDate: contact.latestMessage.timestamp,
+      messageCount: contact.messageCount,
+      unreadCount: contact.unreadCount,
+      lastMessage: {
+        text: contact.latestMessage.message,
+        direction: contact.latestMessage.direction,
+        timestamp: contact.latestMessage.timestamp,
+        status: contact.latestMessage.status
+      }
+    }));
+
+    logInfo(`Retrieved ${formattedContacts.length} contacts`);
+
+    res.json({
+      success: true,
+      data: formattedContacts,
+      pagination: {
+        total,
+        page: pageNum,
+        totalPages,
+        limit: limitNum,
+        hasNextPage: pageNum < totalPages,
+        hasPrevPage: pageNum > 1
+      }
+    });
+
+  } catch (error) {
+    logError('Error fetching contacts:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: 'Failed to fetch contacts' 
     });
   }
 });
@@ -816,6 +971,15 @@ router.patch('/messages/read', async (req, res) => {
       });
     }
 
+    // Emit socket event for real-time updates
+    const io = req.app.get('socketio');
+    if (contactId) {
+      emitSocketEvent(io, contactId.trim(), 'messages-read', {
+        contactId: contactId.trim(),
+        readCount: result.modifiedCount
+      });
+    }
+
     logInfo(`Marked ${result.modifiedCount} out of ${result.matchedCount} messages as read`);
 
     res.json({ 
@@ -832,6 +996,56 @@ router.patch('/messages/read', async (req, res) => {
     res.status(500).json({ 
       success: false, 
       error: 'Failed to mark messages as read' 
+    });
+  }
+});
+
+/**
+ * DELETE /messages/:messageId
+ * Delete a specific message
+ */
+router.delete('/messages/:messageId', async (req, res) => {
+  try {
+    const { messageId } = req.params;
+
+    // Input validation
+    if (!messageId || typeof messageId !== 'string') {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'messageId is required and must be a string' 
+      });
+    }
+
+    // Find and delete the message
+    const deletedMessage = await Message.findByIdAndDelete(messageId.trim());
+
+    if (!deletedMessage) {
+      return res.status(404).json({ 
+        success: false, 
+        error: 'Message not found' 
+      });
+    }
+
+    // Emit socket event for real-time updates
+    const io = req.app.get('socketio');
+    emitSocketEvent(io, deletedMessage.contactId, 'message-deleted', {
+      messageId: deletedMessage._id,
+      contactId: deletedMessage.contactId
+    });
+
+    logInfo(`Message deleted: ${messageId}`);
+
+    res.json({ 
+      success: true, 
+      message: 'Message deleted successfully',
+      data: { messageId: deletedMessage._id }
+    });
+
+  } catch (error) {
+    logError('Error deleting message:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: 'Failed to delete message' 
     });
   }
 });
@@ -897,6 +1111,316 @@ router.get('/messages/:messageId/status', async (req, res) => {
     res.status(500).json({ 
       success: false, 
       error: 'Failed to get message status' 
+    });
+  }
+});
+
+/**
+ * POST /messages/:messageId/retry
+ * Retry sending a failed message
+ */
+router.post('/messages/:messageId/retry', async (req, res) => {
+  try {
+    const { messageId } = req.params;
+
+    // Input validation
+    if (!messageId || typeof messageId !== 'string') {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'messageId is required and must be a string' 
+      });
+    }
+
+    // Find the failed message
+    const message = await Message.findById(messageId.trim());
+
+    if (!message) {
+      return res.status(404).json({ 
+        success: false, 
+        error: 'Message not found' 
+      });
+    }
+
+    if (message.status !== 'failed') {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Only failed messages can be retried' 
+      });
+    }
+
+    // Construct status callback URL
+    const apiBaseUrl = process.env.API_BASE_URL || 'https://whatsappwidget-be.onrender.com';
+    const statusCallbackUrl = `${apiBaseUrl}/webhook/status`;
+
+    // Prepare message options based on message type
+    const messageOptions = {
+      from: message.from,
+      to: message.to,
+      statusCallback: statusCallbackUrl
+    };
+
+    if (message.messageType === 'template') {
+      messageOptions.contentSid = message.contentSid;
+      messageOptions.contentVariables = JSON.stringify(message.contentVariables || {});
+    } else {
+      if (message.message) {
+        messageOptions.body = message.message;
+      }
+      if (message.mediaUrl && message.mediaUrl.length > 0) {
+        messageOptions.mediaUrl = message.mediaUrl;
+      }
+    }
+
+    // Update message status to queued
+    await updateMessageStatus(message._id, { 
+      status: 'queued', 
+      errorCode: null, 
+      errorMessage: null, 
+      failedAt: null 
+    });
+
+    // Retry sending the message
+    logInfo(`Retrying message: ${messageId}`);
+    const { success, message: twilioMessage, error } = await sendWithRetry(messageOptions);
+
+    if (success) {
+      const updatedData = {
+        messageSid: twilioMessage.sid,
+        status: 'sent',
+        sentAt: new Date()
+      };
+      
+      await updateMessageStatus(message._id, updatedData);
+
+      // Emit socket event
+      const io = req.app.get('socketio');
+      const messageForSocket = {
+        ...message.toObject(),
+        ...updatedData
+      };
+      emitSocketEvent(io, message.contactId, 'message-retry-success', messageForSocket);
+
+      logInfo(`Message retry successful: ${twilioMessage.sid}`);
+      
+      res.json({
+        success: true,
+        message: 'Message retry successful',
+        data: { 
+          messageId: message._id,
+          messageSid: twilioMessage.sid,
+          status: 'sent'
+        }
+      });
+    } else {
+      const errorData = {
+        status: 'failed',
+        errorCode: error.code || 'UNKNOWN_ERROR',
+        errorMessage: error.message || 'Unknown error occurred',
+        failedAt: new Date()
+      };
+      
+      await updateMessageStatus(message._id, errorData);
+
+      // Emit socket event
+      const io = req.app.get('socketio');
+      const messageForSocket = {
+        ...message.toObject(),
+        ...errorData
+      };
+      emitSocketEvent(io, message.contactId, 'message-retry-failed', messageForSocket);
+
+      logError(`Message retry failed: ${error.message} (Code: ${error.code})`);
+      
+      res.status(500).json({ 
+        success: false, 
+        error: `Message retry failed: ${error.message}`,
+        errorCode: error.code
+      });
+    }
+
+  } catch (error) {
+    logError('Error retrying message:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: 'Failed to retry message' 
+    });
+  }
+});
+
+/**
+ * GET /analytics/summary
+ * Get analytics summary for messages
+ * Query parameters:
+ * - startDate: Start date for analytics (ISO format)
+ * - endDate: End date for analytics (ISO format)
+ * - contactId: Optional contact ID filter
+ */
+router.get('/analytics/summary', async (req, res) => {
+  try {
+    const { startDate, endDate, contactId } = req.query;
+
+    // Build query for date range
+    const query = {};
+    
+    if (startDate || endDate) {
+      query.timestamp = {};
+      
+      if (startDate) {
+        const start = new Date(startDate);
+        if (isNaN(start.getTime())) {
+          return res.status(400).json({ 
+            success: false, 
+            error: 'Invalid startDate format' 
+          });
+        }
+        query.timestamp.$gte = start;
+      }
+      
+      if (endDate) {
+        const end = new Date(endDate);
+        if (isNaN(end.getTime())) {
+          return res.status(400).json({ 
+            success: false, 
+            error: 'Invalid endDate format' 
+          });
+        }
+        query.timestamp.$lte = end;
+      }
+    }
+
+    if (contactId) {
+      query.contactId = contactId.trim();
+    }
+
+    // Aggregate analytics data
+    const analytics = await Message.aggregate([
+      { $match: query },
+      {
+        $group: {
+          _id: null,
+          totalMessages: { $sum: 1 },
+          sentMessages: {
+            $sum: { $cond: [{ $eq: ['$status', 'sent'] }, 1, 0] }
+          },
+          failedMessages: {
+            $sum: { $cond: [{ $eq: ['$status', 'failed'] }, 1, 0] }
+          },
+          inboundMessages: {
+            $sum: { $cond: [{ $eq: ['$direction', 'inbound'] }, 1, 0] }
+          },
+          outboundMessages: {
+            $sum: { $cond: [{ $eq: ['$direction', 'outbound'] }, 1, 0] }
+          },
+          textMessages: {
+            $sum: { $cond: [{ $eq: ['$messageType', 'text'] }, 1, 0] }
+          },
+          mediaMessages: {
+            $sum: { $cond: [{ $eq: ['$messageType', 'media'] }, 1, 0] }
+          },
+          templateMessages: {
+            $sum: { $cond: [{ $eq: ['$messageType', 'template'] }, 1, 0] }
+          },
+          unreadMessages: {
+            $sum: { 
+              $cond: [
+                { 
+                  $and: [
+                    { $eq: ['$direction', 'inbound'] },
+                    { $ne: ['$isRead', true] }
+                  ]
+                }, 
+                1, 
+                0
+              ] 
+            }
+          }
+        }
+      }
+    ]);
+
+    // Get unique contacts count
+    const uniqueContacts = await Message.distinct('contactId', query);
+
+    const summary = analytics.length > 0 ? analytics[0] : {
+      totalMessages: 0,
+      sentMessages: 0,
+      failedMessages: 0,
+      inboundMessages: 0,
+      outboundMessages: 0,
+      textMessages: 0,
+      mediaMessages: 0,
+      templateMessages: 0,
+      unreadMessages: 0
+    };
+
+    // Remove the _id field and add additional metrics
+    delete summary._id;
+    summary.uniqueContacts = uniqueContacts.length;
+    summary.successRate = summary.totalMessages > 0 
+      ? ((summary.sentMessages / summary.totalMessages) * 100).toFixed(2)
+      : '0.00';
+
+    logInfo('Analytics summary generated');
+
+    res.json({
+      success: true,
+      data: summary,
+      dateRange: {
+        startDate: startDate || null,
+        endDate: endDate || null
+      }
+    });
+
+  } catch (error) {
+    logError('Error generating analytics summary:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: 'Failed to generate analytics summary' 
+    });
+  }
+});
+
+/**
+ * GET /health
+ * Health check endpoint
+ */
+router.get('/health', async (req, res) => {
+  try {
+    // Check database connectivity
+    const messageCount = await Message.estimatedDocumentCount();
+    
+    // Check Twilio connectivity (optional)
+    let twilioStatus = 'unknown';
+    try {
+      if (twilioClient) {
+        await twilioClient.api.accounts(process.env.TWILIO_ACCOUNT_SID).fetch();
+        twilioStatus = 'connected';
+      }
+    } catch (twilioError) {
+      twilioStatus = 'error';
+      logError('Twilio health check failed:', twilioError);
+    }
+
+    res.json({
+      success: true,
+      status: 'healthy',
+      timestamp: new Date().toISOString(),
+      services: {
+        database: 'connected',
+        twilio: twilioStatus
+      },
+      stats: {
+        totalMessages: messageCount
+      }
+    });
+
+  } catch (error) {
+    logError('Health check failed:', error);
+    res.status(500).json({
+      success: false,
+      status: 'unhealthy',
+      timestamp: new Date().toISOString(),
+      error: 'Health check failed'
     });
   }
 });
