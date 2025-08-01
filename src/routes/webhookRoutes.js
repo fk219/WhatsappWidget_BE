@@ -118,6 +118,7 @@ router.post('/incoming', async (req, res) => {
 
     let message = await Message.findOne({ messageSid: MessageSid });
     if (!message) {
+      const now = new Date();
       message = new Message({
         messageSid: MessageSid,
         contactId: cleanFrom,
@@ -129,7 +130,8 @@ router.post('/incoming', async (req, res) => {
         isRead: false,
         from: From,
         to: To,
-        timestamp: new Date(),
+        timestamp: now,
+        deliveredAt: now,
         mediaUrl: []
       });
 
