@@ -550,8 +550,16 @@ router.post('/send-template', async (req, res) => {
     const { success, message, error } = await sendWithRetry(messageOptions);
 
     if (success) {
+      // Fetch the actual message body from Twilio
+      const fetchedMessage = await twilioClient.messages(message.sid).fetch();
+
       await Message.updateOne({ _id: newMessage._id }, {
-        $set: { messageSid: message.sid, status: 'sent', sentAt: new Date() }
+        $set: { 
+          messageSid: message.sid, 
+          status: 'sent', 
+          sentAt: new Date(),
+          message: fetchedMessage.body || ''
+        }
       });
       logInfo(`Template sent successfully: ${message.sid}`);
       res.status(202).json({
@@ -895,7 +903,7 @@ router.get('/messages/:messageId/status', async (req, res) => {
 
 /**
  * Global error handler for the router
- * Catches any unhandled errors and returns a consistent error response!
+ * Catches any unhandled errors and returns a consistent error response
  */
 router.use((error, req, res, next) => {
   logError('Unhandled error in WhatsApp routes:', error);
