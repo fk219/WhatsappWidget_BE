@@ -122,6 +122,7 @@ router.post('/incoming', async (req, res) => {
         messageSid: MessageSid,
         contactId: cleanFrom,
         contactName,
+        fromName: contactName || 'Unknown',
         message: Body,
         direction: 'inbound',
         status: 'received',
