@@ -895,7 +895,7 @@ router.get('/messages/:messageId/status', async (req, res) => {
 
 /**
  * Global error handler for the router
- * Catches any unhandled errors and returns a consistent error response
+ * Catches any unhandled errors and returns a consistent error response!
  */
 router.use((error, req, res, next) => {
   logError('Unhandled error in WhatsApp routes:', error);
