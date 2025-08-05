@@ -22,14 +22,7 @@ const server = http.createServer(app);
 
 // Configure CORS options to allow specific origins and methods
 const corsOptions = {
-  origin: [
-    'https://resilient-bear-otclnn-dev-ed.lightning.force.com',
-    'https://resilient-bear-otclnn-dev-ed.trailblaze.lightning.force.com',
-    'https://resilient-bear-otclnn-dev-ed.trailblaze.my.salesforce.com',
-    'http://localhost:3000',
-    'http://localhost:3001',
-    'http://localhost:3002'
-  ],
+  origin: true, // Allow all origins for testing
   methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin'],
   credentials: true,
@@ -58,6 +51,8 @@ app.set('socketio', io);
 
 // Mount message-related routes under /api/messages
 app.use('/api/messages', messageRoutes);
+// Also mount directly under /messages for frontend compatibility
+app.use('/messages', messageRoutes);
 // Mount webhook-related routes under /webhook
 app.use('/webhook', webhookRoutes);
 // Mount contact-related routes under /api
