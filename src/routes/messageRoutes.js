@@ -74,14 +74,31 @@ const formatPhoneNumber = (number) => {
   
   // Remove international prefixes (+, 00) and format for WhatsApp
   // This handles various international number formats
-  const formattedNumber = cleanNumber.replace(/^(\+|00)/, '');
+  // Ensure the number starts with '+' and contains only digits thereafter
+  // If it doesn't start with '+', assume a default country code or handle as per business logic
+  // For Twilio WhatsApp, E.164 format (e.g., +1234567890) is required.
+  let formattedNumber = cleanNumber;
+  if (!formattedNumber.startsWith('+')) {
+    // This is a placeholder. You might need to prepend a default country code
+    // based on your target audience or fetch it from contact details.
+    // For example, if most users are in the US, you might do: formattedNumber = '+1' + formattedNumber;
+    // For now, we'll just ensure it's digits only if no '+' is present.
+    formattedNumber = formattedNumber.replace(/\D/g, '');
+    // If it's still not E.164, it will likely fail Twilio validation.
+    // A more robust solution would involve a phone number parsing library.
+  }
+  
+  // Remove any non-digit characters except for the leading '+'
+  formattedNumber = '+' + formattedNumber.replace(/^\+/, '').replace(/\D/g, '');
   
   // Basic validation - should contain only digits after prefix removal
-  if (!/^\d{10,15}$/.test(formattedNumber)) {
+  const digitsOnly = formattedNumber.replace(/^\+/, '');
+  if (!/^\d{10,15}$/.test(digitsOnly)) {
     logError(`Invalid phone number format after processing: ${formattedNumber} (original: ${cleanNumber})`);
     return null;
   }
   
+  // Twilio WhatsApp API expects numbers in the format 'whatsapp:+E.164_NUMBER'
   return `whatsapp:${formattedNumber}`;
 };
 
@@ -342,156 +359,6 @@ router.post('/send-message', async (req, res) => {
  * - contactName: Display name for the contact
  * - fromName: Sender name (defaults to 'Salesforce User')
  */
-// router.post('/send-template', async (req, res) => {
-//   try {
-//     const { 
-//       contactId, 
-//       to, 
-//       contentSid, 
-//       contentVariables, 
-//       contactName, 
-//       fromName = 'Salesforce User' 
-//     } = req.body;
-
-//     // Input validation
-//     if (!contactId || typeof contactId !== 'string') {
-//       return res.status(400).json({ 
-//         success: false, 
-//         error: 'contactId is required and must be a string' 
-//       });
-//     }
-
-//     if (!to || typeof to !== 'string') {
-//       return res.status(400).json({ 
-//         success: false, 
-//         error: 'to is required and must be a valid phone number' 
-//       });
-//     }
-
-//     if (!contentSid || typeof contentSid !== 'string') {
-//       return res.status(400).json({ 
-//         success: false, 
-//         error: 'contentSid is required and must be a valid Twilio Content SID' 
-//       });
-//     }
-
-//     // Format and validate phone numbers
-//     const formattedTo = formatPhoneNumber(to);
-//     if (!formattedTo) {
-//       return res.status(400).json({ 
-//         success: false, 
-//         error: 'Invalid recipient phone number format. Use E.164 format (e.g., +1234567890)' 
-//       });
-//     }
-
-//     const fromNumber = formatPhoneNumber(process.env.TWILIO_FROM_NUMBER);
-//     if (!fromNumber) {
-//       logError('TWILIO_FROM_NUMBER environment variable is not configured or invalid');
-//       return res.status(500).json({ 
-//         success: false, 
-//         error: 'Server configuration error: FROM_NUMBER not configured' 
-//       });
-//     }
-
-//     // Validate contentVariables if provided
-//     let validatedContentVariables = {};
-//     if (contentVariables) {
-//       if (typeof contentVariables === 'object') {
-//         validatedContentVariables = contentVariables;
-//       } else {
-//         return res.status(400).json({ 
-//           success: false, 
-//           error: 'contentVariables must be an object or array' 
-//         });
-//       }
-//     }
-
-//     // Create initial message document
-//     const tempMessageSid = `tw_${uuidv4()}`;
-//     const messageData = {
-//       messageSid: tempMessageSid,
-//       contactId: contactId.trim(),
-//       contactName: contactName?.trim() || 'Unknown',
-//       contentSid: contentSid.trim(),
-//       contentVariables: validatedContentVariables,
-//       fromName: fromName?.trim() || 'Salesforce User',
-//       direction: 'outbound',
-//       status: 'queued',
-//       from: fromNumber,
-//       to: formattedTo,
-//       messageType: 'template'
-//     };
-
-//     const newMessage = await createMessageDocument(messageData);
-
-//     // Construct status callback URL with fallback
-//     const apiBaseUrl = process.env.API_BASE_URL || 'https://whatsappwidget-be.onrender.com';
-//     const statusCallbackUrl = `${apiBaseUrl}/webhook/status`;
-
-//     // Prepare Twilio template message options
-//     const messageOptions = {
-//       from: fromNumber,
-//       to: formattedTo,
-//       contentSid: contentSid.trim(),
-//       contentVariables: Array.isArray(validatedContentVariables) 
-//         ? validatedContentVariables 
-//         : Object.values(validatedContentVariables), // Convert to array if object
-//       statusCallback: statusCallbackUrl
-//     };
-
-//     // Send template via Twilio with retry logic
-//     logInfo(`Sending template ${contentSid} to ${formattedTo} for contact ${contactId}`);
-//     const { success, message, error } = await sendWithRetry(messageOptions);
-
-//     // Update message document based on result
-//     if (success) {
-//       await updateMessageStatus(newMessage._id, {
-//         messageSid: message.sid,
-//         status: 'sent',
-//         sentAt: new Date()
-//       });
-
-//       logInfo(`Template sent successfully: ${message.sid} to ${formattedTo}`);
-      
-//       res.status(202).json({
-//         success: true,
-//         message: 'Template sent successfully',
-//         data: { 
-//           messageId: newMessage._id,
-//           messageSid: message.sid,
-//           status: 'sent',
-//           contactId,
-//           contentSid,
-//           to: formattedTo
-//         }
-//       });
-//     } else {
-//       await updateMessageStatus(newMessage._id, {
-//         status: 'failed',
-//         errorCode: error.code || 'UNKNOWN_ERROR',
-//         errorMessage: error.message || 'Unknown error occurred',
-//         failedAt: new Date()
-//       });
-
-//       logError(`Failed to send template to ${formattedTo}: ${error.message} (Code: ${error.code})`);
-      
-//       res.status(500).json({ 
-//         success: false, 
-//         error: `Failed to send template: ${error.message}`,
-//         errorCode: error.code
-//       });
-//     }
-
-//   } catch (error) {
-//     logError('Error in send-template endpoint:', error);
-//     res.status(500).json({ 
-//       success: false, 
-//       error: 'Internal server error while sending template' 
-//     });
-//   }
-// });
-
-// src/routes/messageRoutes.js (partial update for send-template)
 router.post('/send-template', async (req, res) => {
   try {
     const { contactId, to, contentSid, contentVariables, contactName, fromName = 'Salesforce User' } = req.body;
@@ -580,10 +447,8 @@ router.post('/send-template', async (req, res) => {
   }
 });
 
-
-
 /**
- * GET /messages
+ * GET / (mounted at /messages)
  * Get messages with pagination and filtering
  * 
  * Query parameters:
@@ -595,10 +460,15 @@ router.post('/send-template', async (req, res) => {
  * - page: Page number (default: 1)
  * - limit: Number of messages per page (default: 20, max: 100)
  */
-router.get('/messages', async (req, res) => {
+router.get('/', async (req, res) => {
+  // Fallback for direct browser access (no query params)
+  if (Object.keys(req.query).length === 0) {
+    return res.status(200).send('<h2>WhatsApp Widget API</h2><p>Use this endpoint with query parameters (e.g. ?contactId=... or ?phone=...)</p>');
+  }
   try {
     const { 
       contactId, 
+      phone, // allow phone number as a query param
       status, 
       direction, 
       startDate, 
@@ -620,23 +490,26 @@ router.get('/messages', async (req, res) => {
 
     // Build query object
     const query = {};
-    
     if (contactId) {
       query.contactId = contactId.trim();
     }
-    
+    // Support phone number as a fallback (normalize for both from/to)
+    if (phone) {
+      const normalizedPhone = phone.replace(/[^\d]/g, '');
+      query.$or = [
+        { from: new RegExp(normalizedPhone, 'i') },
+        { to: new RegExp(normalizedPhone, 'i') }
+      ];
+    }
     if (status) {
       query.status = status.trim();
     }
-    
     if (direction && ['inbound', 'outbound'].includes(direction.toLowerCase())) {
       query.direction = direction.toLowerCase();
     }
-
     // Date range filtering
     if (startDate || endDate) {
       query.timestamp = {};
-      
       if (startDate) {
         const start = new Date(startDate);
         if (isNaN(start.getTime())) {
@@ -647,7 +520,6 @@ router.get('/messages', async (req, res) => {
         }
         query.timestamp.$gte = start;
       }
-      
       if (endDate) {
         const end = new Date(endDate);
         if (isNaN(end.getTime())) {
@@ -659,28 +531,22 @@ router.get('/messages', async (req, res) => {
         query.timestamp.$lte = end;
       }
     }
-
     // Execute query with pagination
     const skip = (pageNum - 1) * limitNum;
-    
     const [total, messages] = await Promise.all([
       Message.countDocuments(query),
       Message.find(query)
         .sort({ timestamp: -1 })
         .skip(skip)
         .limit(limitNum)
-        .lean() // Use lean() for better performance
+        .lean()
     ]);
-
     // Get contact name from the first message
     const contactName = messages.length > 0 
       ? (messages[0].contactName || messages[0].fromName || 'Unknown Contact')
       : null;
-
     const totalPages = Math.ceil(total / limitNum);
-
     logInfo(`Retrieved ${messages.length} messages for query: ${JSON.stringify(query)}`);
-
     res.json({
       success: true,
       data: messages,
@@ -694,7 +560,6 @@ router.get('/messages', async (req, res) => {
         hasPrevPage: pageNum > 1
       }
     });
-
   } catch (error) {
     logError('Error fetching messages:', error);
     res.status(500).json({ 
@@ -705,14 +570,14 @@ router.get('/messages', async (req, res) => {
 });
 
 /**
- * PATCH /messages/read
+ * PATCH /read
  * Mark messages as read
  * 
  * Request body:
  * - messageIds: Array of message IDs to mark as read (optional if contactId provided)
  * - contactId: Contact ID to mark all unread inbound messages as read (optional if messageIds provided)
  */
-router.patch('/messages/read', async (req, res) => {
+router.patch('/read', async (req, res) => {
   try {
     const { messageIds, contactId } = req.body;
 
@@ -787,12 +652,12 @@ router.patch('/messages/read', async (req, res) => {
 });
 
 /**
- * GET /messages/:messageId/status
+ * GET /:messageId/status
  * Get message status by message ID or Twilio SID
  * 
  * Supports both internal message ID and Twilio message SID
  */
-router.get('/messages/:messageId/status', async (req, res) => {
+router.get('/:messageId/status', async (req, res) => {
   try {
     const { messageId } = req.params;
 
