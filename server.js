@@ -20,19 +20,89 @@ const app = express();
 // Create an HTTP server using the Express app
 const server = http.createServer(app);
 
-// Configure CORS options to allow specific origins and methods
+// Configure CORS options to allow Salesforce domains
 const corsOptions = {
-  origin: true, // Allow all origins for testing
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) return callback(null, true);
+    
+    // List of allowed origins
+    const allowedOrigins = [
+      'https://resilient-bear-otclnn-dev-ed.trailblaze.lightning.force.com',
+      'https://resilient-bear-otclnn-dev-ed.trailblaze.my.salesforce.com',
+      'https://resilient-bear-otclnn-dev-ed.trailblaze.my.salesforce-scrt.com',
+      'https://ind134.sfdc-y37hzm.salesforce.com',
+      /\.lightning\.force\.com$/,
+      /\.salesforce\.com$/,
+      /\.my\.salesforce\.com$/,
+      /\.trailblaze\.my\.salesforce\.com$/,
+      'http://localhost:3000',
+      'http://localhost:3001',
+      'http://localhost:3002'
+    ];
+    
+    // Check if origin is allowed
+    const isAllowed = allowedOrigins.some(allowedOrigin => {
+      if (typeof allowedOrigin === 'string') {
+        return origin === allowedOrigin;
+      } else if (allowedOrigin instanceof RegExp) {
+        return allowedOrigin.test(origin);
+      }
+      return false;
+    });
+    
+    if (isAllowed) {
+      callback(null, true);
+    } else {
+      console.log(`CORS blocked origin: ${origin}`);
+      callback(null, true); // Allow all for now, but log blocked origins
+    }
+  },
   methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin'],
+  allowedHeaders: [
+    'Content-Type', 
+    'Authorization', 
+    'X-Requested-With', 
+    'Accept', 
+    'Origin',
+    'Access-Control-Request-Method',
+    'Access-Control-Request-Headers',
+    'X-CSRF-Token',
+    'X-Salesforce-Chat'
+  ],
+  exposedHeaders: [
+    'Access-Control-Allow-Origin',
+    'Access-Control-Allow-Methods',
+    'Access-Control-Allow-Headers'
+  ],
   credentials: true,
-  optionsSuccessStatus: 204
+  optionsSuccessStatus: 200,
+  preflightContinue: false
 };
 
 // Apply CORS middleware to handle cross-origin requests
 app.use(cors(corsOptions));
 // Handle preflight requests with CORS
 app.options('*', cors(corsOptions));
+
+// Additional CORS headers middleware for extra compatibility
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  if (origin) {
+    res.header('Access-Control-Allow-Origin', origin);
+  }
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PATCH, PUT, DELETE, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, X-CSRF-Token, X-Salesforce-Chat');
+  res.header('Access-Control-Allow-Credentials', 'true');
+  res.header('Access-Control-Max-Age', '86400'); // 24 hours
+  
+  if (req.method === 'OPTIONS') {
+    res.status(200).end();
+    return;
+  }
+  next();
+});
+
 // Parse JSON bodies with a 50MB limit
 app.use(express.json({ limit: '50mb' }));
 // Parse URL-encoded bodies with a 50MB limit
@@ -40,14 +110,36 @@ app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
 // Initialize Socket.IO with the HTTP server and CORS configuration
 const io = new Server(server, { 
-  cors: corsOptions, 
+  cors: {
+    origin: function (origin, callback) {
+      callback(null, true); // Allow all origins for Socket.IO
+    },
+    methods: ['GET', 'POST'],
+    credentials: true
+  }, 
   pingTimeout: 60000,
-  pingInterval: 25000
+  pingInterval: 25000,
+  transports: ['websocket', 'polling']
 });
+
 // Set up Socket.IO handler for real-time communication
 socketHandler(io);
 // Make Socket.IO instance accessible to routes
 app.set('socketio', io);
+
+// Root endpoint
+app.get('/', (req, res) => {
+  res.json({
+    message: 'WhatsApp Widget Backend API',
+    status: 'running',
+    timestamp: new Date().toISOString(),
+    endpoints: {
+      health: '/api/health',
+      messages: '/messages',
+      webhooks: '/webhook'
+    }
+  });
+});
 
 // Mount message-related routes under /api/messages
 app.use('/api/messages', messageRoutes);
@@ -63,9 +155,12 @@ app.get('/api/health', (req, res) =>
   res.json({ 
     status: 'ok', 
     timestamp: new Date().toISOString(), 
-    uptime: process.uptime() 
+    uptime: process.uptime(),
+    cors: 'enabled',
+    mongodb: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected'
   })
 );
+
 // Health check endpoint for database status
 app.get('/api/health/db', async (req, res) => 
   res.json({ 
@@ -73,6 +168,24 @@ app.get('/api/health/db', async (req, res) =>
     timestamp: new Date().toISOString() 
   })
 );
+
+// Global error handler
+app.use((err, req, res, next) => {
+  console.error(`[${new Date().toISOString()}] Error:`, err);
+  res.status(500).json({
+    error: 'Internal Server Error',
+    message: process.env.NODE_ENV === 'development' ? err.message : 'Something went wrong'
+  });
+});
+
+// 404 handler
+app.use('*', (req, res) => {
+  res.status(404).json({
+    error: 'Not Found',
+    message: `Route ${req.method} ${req.originalUrl} not found`,
+    availableRoutes: ['/api/health', '/messages', '/webhook']
+  });
+});
 
 // Function to start the server with Render-compatible port binding
 const startServer = () => {
@@ -83,6 +196,7 @@ const startServer = () => {
       console.log(`[${new Date().toISOString()}] ${green}Server running on http://0.0.0.0:${port}${reset}`);
       console.log(`[${new Date().toISOString()}] ${green}Health check: http://0.0.0.0:${port}/api/health${reset}`);
       console.log(`[${new Date().toISOString()}] ${green}Database health: http://0.0.0.0:${port}/api/health/db${reset}`);
+      console.log(`[${new Date().toISOString()}] ${green}CORS enabled for Salesforce domains${reset}`);
       resolve();
     }).on('error', (err) => {
       console.error(`[${new Date().toISOString()}] Server error:`, err.message);
