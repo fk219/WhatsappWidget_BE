@@ -65,41 +65,63 @@ const formatPhoneNumber = (number) => {
   }
   
   // Remove any whitespace
-  const cleanNumber = number.trim();
+  let cleanNumber = number.trim();
   
   // Return as-is if already in WhatsApp format
   if (cleanNumber.startsWith('whatsapp:')) {
     return cleanNumber;
   }
   
-  // Remove international prefixes (+, 00) and format for WhatsApp
-  // This handles various international number formats
-  // Ensure the number starts with '+' and contains only digits thereafter
-  // If it doesn't start with '+', assume a default country code or handle as per business logic
-  // For Twilio WhatsApp, E.164 format (e.g., +1234567890) is required.
-  let formattedNumber = cleanNumber;
-  if (!formattedNumber.startsWith('+')) {
-    // This is a placeholder. You might need to prepend a default country code
-    // based on your target audience or fetch it from contact details.
-    // For example, if most users are in the US, you might do: formattedNumber = '+1' + formattedNumber;
-    // For now, we'll just ensure it's digits only if no '+' is present.
-    formattedNumber = formattedNumber.replace(/\D/g, '');
-    // If it's still not E.164, it will likely fail Twilio validation.
-    // A more robust solution would involve a phone number parsing library.
+  // Handle the format we receive from frontend: whatsapp:+1234567890
+  if (cleanNumber.startsWith('whatsapp:+')) {
+    cleanNumber = cleanNumber.substring(9); // Remove 'whatsapp:' prefix
   }
   
-  // Remove any non-digit characters except for the leading '+'
-  formattedNumber = '+' + formattedNumber.replace(/^\+/, '').replace(/\D/g, '');
+  // If it starts with 'whatsapp:' but not '+', handle appropriately
+  if (cleanNumber.startsWith('whatsapp:')) {
+    cleanNumber = cleanNumber.substring(9); // Remove 'whatsapp:' prefix
+    // Add '+' if not present
+    if (!cleanNumber.startsWith('+')) {
+      cleanNumber = '+' + cleanNumber;
+    }
+  }
+  
+  // Remove all non-digit characters except +
+  cleanNumber = cleanNumber.replace(/[^\d+]/g, '');
+  
+  // If it doesn't start with '+', we need to handle it
+  if (!cleanNumber.startsWith('+')) {
+    // Remove all non-digit characters
+    const digitsOnly = cleanNumber.replace(/\D/g, '');
+    
+    // Handle UAE numbers specifically
+    if (digitsOnly.startsWith('971')) {
+      // Already has UAE country code
+      cleanNumber = '+' + digitsOnly;
+    } else if (digitsOnly.startsWith('0') && digitsOnly.length > 1) {
+      // Remove leading 0 and add UAE country code
+      cleanNumber = '+971' + digitsOnly.substring(1);
+    } else if (digitsOnly.length >= 9) {
+      // Assume it's a UAE number without country code
+      cleanNumber = '+971' + digitsOnly;
+    } else {
+      // Fallback: add UAE country code
+      cleanNumber = '+971' + digitsOnly;
+    }
+  } else {
+    // It starts with '+', just clean it
+    cleanNumber = '+' + cleanNumber.substring(1).replace(/\D/g, '');
+  }
   
   // Basic validation - should contain only digits after prefix removal
-  const digitsOnly = formattedNumber.replace(/^\+/, '');
+  const digitsOnly = cleanNumber.replace(/^\+/, '');
   if (!/^\d{10,15}$/.test(digitsOnly)) {
-    logError(`Invalid phone number format after processing: ${formattedNumber} (original: ${cleanNumber})`);
+    logError(`Invalid phone number format after processing: ${cleanNumber} (original: ${number})`);
     return null;
   }
   
   // Twilio WhatsApp API expects numbers in the format 'whatsapp:+E.164_NUMBER'
-  return `whatsapp:${formattedNumber}`;
+  return `whatsapp:${cleanNumber}`;
 };
 
 /**
