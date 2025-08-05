@@ -55,7 +55,7 @@ const corsOptions = {
       callback(null, true);
     } else {
       console.log(`CORS blocked origin: ${origin}`);
-      callback(null, true); // Allow all for now, but log blocked origins
+      callback(new Error('Not allowed by CORS'));
     }
   },
   methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
@@ -68,7 +68,9 @@ const corsOptions = {
     'Access-Control-Request-Method',
     'Access-Control-Request-Headers',
     'X-CSRF-Token',
-    'X-Salesforce-Chat'
+    'X-Salesforce-Chat',
+    'Cache-Control',
+    'Pragma'
   ],
   exposedHeaders: [
     'Access-Control-Allow-Origin',
@@ -92,7 +94,7 @@ app.use((req, res, next) => {
     res.header('Access-Control-Allow-Origin', origin);
   }
   res.header('Access-Control-Allow-Methods', 'GET, POST, PATCH, PUT, DELETE, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, X-CSRF-Token, X-Salesforce-Chat');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin, Access-Control-Request-Method, Access-Control-Request-Headers, X-CSRF-Token, X-Salesforce-Chat, Cache-Control, Pragma');
   res.header('Access-Control-Allow-Credentials', 'true');
   res.header('Access-Control-Max-Age', '86400'); // 24 hours
   
