@@ -6,6 +6,7 @@ import mongoose from 'mongoose'; // Import Mongoose for MongoDB connection
 import { Server } from 'socket.io'; // Import Socket.IO Server for real-time communication
 import messageRoutes from './src/routes/messageRoutes.js'; // Import message-related routes
 import webhookRoutes from './src/routes/webhookRoutes.js'; // Import webhook-related routes
+import contactRoutes from './src/routes/contactRoutes.js'; // Import contact-related routes
 import socketHandler from './src/utils/socket.js'; // Import Socket.IO handler utility
 import connectDB from './src/config/db.js'; // Import MongoDB connection function
 import fs from 'fs'; // Import file system module for lock file management
@@ -20,71 +21,20 @@ const app = express();
 const server = http.createServer(app);
 
 // Configure CORS options to allow specific origins and methods
-const allowedOrigins = [
-  'https://resilient-bear-otclnn-dev-ed.lightning.force.com',
-  'https://resilient-bear-otclnn-dev-ed.trailblaze.lightning.force.com',
-  'https://resilient-bear-otclnn-dev-ed.my.salesforce.com',
-  'https://resilient-bear-otclnn-dev-ed.trailblaze.my.salesforce.com',
-  'http://localhost:3000',
-  'http://localhost:3002',
-  'https://resilient-bear-otclnn-dev-ed.lightning.force.com/',
-  'https://resilient-bear-otclnn-dev-ed.trailblaze.lightning.force.com/',
-  'https://resilient-bear-otclnn-dev-ed.my.salesforce.com/',
-  'https://resilient-bear-otclnn-dev-ed.trailblaze.my.salesforce.com/'
-];
-
 const corsOptions = {
-  origin: function (origin, callback) {
-    // Allow requests with no origin (like mobile apps, curl, etc.)
-    if (!origin) return callback(null, true);
-    
-    // Normalize origin by removing trailing slashes
-    const normalizedOrigin = origin.endsWith('/') ? origin.slice(0, -1) : origin;
-    
-    // Check if the origin is in the allowed list
-    if (allowedOrigins.some(allowed => 
-      normalizedOrigin === allowed || 
-      normalizedOrigin === allowed.replace(/\/$/, '')
-    )) {
-      return callback(null, true);
-    }
-    
-    const msg = `The CORS policy for this site does not allow access from the specified Origin: ${origin}`;
-    console.warn(msg);
-    return callback(new Error(msg), false);
-  },
-  methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS', 'HEAD'],
-  allowedHeaders: [
-    'Content-Type',
-    'Authorization',
-    'X-Requested-With',
-    'X-Contact-ID',
-    'X-Socket-ID',
-    'Accept',
-    'Origin',
-    'X-Forwarded-For',
-    'X-Forwarded-Proto',
-    'X-Salesforce-Proxy-Request',
-    'X-Salesforce-Proxy-Origin',
-    'X-Salesforce-Proxy-Destination',
-    'X-Salesforce-Proxy-Timeout',
-    'X-Salesforce-Proxy-User-Agent',
-    'X-Salesforce-Proxy-Client-IP'
+  origin: [
+    'https://resilient-bear-otclnn-dev-ed.lightning.force.com',
+    'https://resilient-bear-otclnn-dev-ed.trailblaze.lightning.force.com',
+    'https://resilient-bear-otclnn-dev-ed.trailblaze.my.salesforce.com',
+    'http://localhost:3000',
+    'http://localhost:3001',
+    'http://localhost:3002'
   ],
-  exposedHeaders: [
-    'Content-Length',
-    'X-Socket-ID',
-    'X-Request-Id',
-    'X-Response-Time'
-  ],
+  methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin'],
   credentials: true,
-  maxAge: 86400, // 24 hours
-  preflightContinue: true, // Let Express handle preflight
-  optionsSuccessStatus: 200 // Some legacy browsers (IE11, various SmartTVs) choke on 204
+  optionsSuccessStatus: 204
 };
-
-// Add a specific handler for OPTIONS requests
-app.options('*', cors(corsOptions));
 
 // Apply CORS middleware to handle cross-origin requests
 app.use(cors(corsOptions));
@@ -97,31 +47,9 @@ app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
 // Initialize Socket.IO with the HTTP server and CORS configuration
 const io = new Server(server, { 
-  cors: {
-    ...corsOptions,
-    // Additional WebSocket specific CORS settings
-    transports: ['websocket', 'polling'],
-    allowEIO3: true
-  },
-  // Connection settings
-  pingTimeout: 60000,    // Time to wait before considering a connection dead (ms)
-  pingInterval: 25000,   // How often to ping clients to check if they're still alive (ms)
-  upgradeTimeout: 10000,  // Time to wait for upgrade to complete (ms)
-  maxHttpBufferSize: 1e8, // 100MB max message size
-  allowEIO3: true,       // Enable Socket.IO v3 compatibility
-  // Enable HTTP long-polling as fallback
-  transports: ['websocket', 'polling'],
-  // Enable HTTP compression
-  perMessageDeflate: {
-    threshold: 1024, // Size threshold (in bytes) to compress messages
-    zlibDeflateOptions: {
-      level: 9 // Compression level (0-9)
-    },
-    zlibInflateOptions: {
-      windowBits: 15, // Default is 15 (32KB window)
-      memLevel: 8     // Default is 8 (256KB memory)
-    }
-  }
+  cors: corsOptions, 
+  pingTimeout: 60000,
+  pingInterval: 25000
 });
 // Set up Socket.IO handler for real-time communication
 socketHandler(io);
@@ -132,6 +60,8 @@ app.set('socketio', io);
 app.use('/api/messages', messageRoutes);
 // Mount webhook-related routes under /webhook
 app.use('/webhook', webhookRoutes);
+// Mount contact-related routes under /api
+app.use('/api', contactRoutes);
 
 // Health check endpoint to verify server status
 app.get('/api/health', (req, res) => 
