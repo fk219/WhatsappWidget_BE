@@ -1,4 +1,3 @@
-
 // src/routes/webhookRoutes.js
 import express from 'express';
 import Message from '../models/Message.js';
@@ -50,14 +49,8 @@ router.post('/incoming', async (req, res) => {
       await message.save();
       logInfo(`Incoming message saved: ${MessageSid}`);
     } else {
+      // Update if needed
       await Message.updateOne({ messageSid: MessageSid }, { $set: { status: 'received' } });
-    }
-
-    // ✅ **ADDED**: Emit real-time event to Socket.IO
-    const io = req.app.get('socketio');
-    if (io && message) {
-      io.to(cleanFrom).emit('new-message', message);
-      logInfo(`Emitted new-message for ${MessageSid} to room ${cleanFrom}`);
     }
 
     res.sendStatus(200);
@@ -94,22 +87,18 @@ router.post('/status', async (req, res) => {
       update.errorMessage = req.body.ErrorMessage || 'Delivery failed';
     }
 
-    await Message.updateOne({ messageSid: MessageSid }, { $set: update });
+    const result = await Message.updateOne({ messageSid: MessageSid }, { $set: update });
 
-    // ✅ **ADDED**: Emit status update to Socket.IO
-    const updatedMessage = await Message.findOne({ messageSid: MessageSid });
-    if (updatedMessage) {
-      const io = req.app.get('socketio');
-      if (io) {
-        io.to(updatedMessage.contactId).emit('message-status-update', updatedMessage);
-        logInfo(`Emitted message-status-update for ${MessageSid} to room ${updatedMessage.contactId}`);
-      }
+    if (result.matchedCount > 0) {
+      logInfo(`Message updated successfully: ${MessageSid}`);
+    } else {
+      logError(`No message found for MessageSid: ${MessageSid}`);
     }
 
-    res.sendStatus(200);
+    res.sendStatus(200); // Acknowledge the webhook
   } catch (error) {
     logError('Error processing status webhook:', error);
-    res.sendStatus(500);
+    res.sendStatus(500); // Ensure Twilio retries on failure
   }
 });
 
