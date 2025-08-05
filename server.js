@@ -98,6 +98,7 @@ app.use((req, res, next) => {
   res.header('Access-Control-Allow-Credentials', 'true');
   res.header('Access-Control-Max-Age', '86400'); // 24 hours
   
+  // Handle preflight requests
   if (req.method === 'OPTIONS') {
     res.status(200).end();
     return;
@@ -110,14 +111,28 @@ app.use(express.json({ limit: '50mb' }));
 // Parse URL-encoded bodies with a 50MB limit
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
+// Add request logging middleware
+app.use((req, res, next) => {
+  console.log(`[${new Date().toISOString()}] ${req.method} ${req.path} - Origin: ${req.get('Origin') || 'N/A'}`);
+  next();
+});
+
+// Add error logging middleware
+app.use((err, req, res, next) => {
+  console.error(`[${new Date().toISOString()}] Error:`, err);
+  next(err);
+});
+
 // Initialize Socket.IO with the HTTP server and CORS configuration
 const io = new Server(server, { 
   cors: {
     origin: function (origin, callback) {
-      callback(null, true); // Allow all origins for Socket.IO
+      // Allow all origins for Socket.IO
+      callback(null, true);
     },
     methods: ['GET', 'POST'],
-    credentials: true
+    credentials: true,
+    allowedHeaders: ['Content-Type', 'Authorization']
   }, 
   pingTimeout: 60000,
   pingInterval: 25000,
@@ -173,8 +188,9 @@ app.get('/api/health/db', async (req, res) =>
 
 // Global error handler
 app.use((err, req, res, next) => {
-  console.error(`[${new Date().toISOString()}] Error:`, err);
+  console.error(`[${new Date().toISOString()}] Global error handler - Error:`, err);
   res.status(500).json({
+    success: false,
     error: 'Internal Server Error',
     message: process.env.NODE_ENV === 'development' ? err.message : 'Something went wrong'
   });
@@ -183,6 +199,7 @@ app.use((err, req, res, next) => {
 // 404 handler
 app.use('*', (req, res) => {
   res.status(404).json({
+    success: false,
     error: 'Not Found',
     message: `Route ${req.method} ${req.originalUrl} not found`,
     availableRoutes: ['/api/health', '/messages', '/webhook']
