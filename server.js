@@ -216,4 +216,3 @@ process.on('uncaughtException', (err) => {
 connectDBWrapper();
 // Export the app for potential use in other contexts (e.g., Vercel)
 export default app;
-
