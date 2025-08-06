@@ -521,10 +521,24 @@ router.get('/', async (req, res) => {
     }
 
     // Build query object
-    const query = {};
+    let query = {};
+    let fallbackQuery = null;
+    
     if (contactId) {
       query.contactId = contactId.trim();
+      
+      // If no phone parameter provided, prepare fallback query to search by phone
+      // This helps when contactId doesn't have messages but phone number does
+      if (!phone) {
+        fallbackQuery = {
+          $or: [
+            { from: { $regex: contactId.trim().replace(/[^\d]/g, ''), $options: 'i' } },
+            { to: { $regex: contactId.trim().replace(/[^\d]/g, ''), $options: 'i' } }
+          ]
+        };
+      }
     }
+    
     // Support phone number as a fallback (normalize for both from/to)
     if (phone) {
       const normalizedPhone = phone.replace(/[^\d]/g, '');
@@ -565,7 +579,7 @@ router.get('/', async (req, res) => {
     }
     // Execute query with pagination
     const skip = (pageNum - 1) * limitNum;
-    const [total, messages] = await Promise.all([
+    let [total, messages] = await Promise.all([
       Message.countDocuments(query),
       Message.find(query)
         .sort({ timestamp: -1 })
@@ -573,6 +587,24 @@ router.get('/', async (req, res) => {
         .limit(limitNum)
         .lean()
     ]);
+    
+    // If no messages found and we have a fallback query, try it
+    if (messages.length === 0 && fallbackQuery) {
+      logInfo(`No messages found for contactId query, trying fallback phone search: ${JSON.stringify(fallbackQuery)}`);
+      [total, messages] = await Promise.all([
+        Message.countDocuments(fallbackQuery),
+        Message.find(fallbackQuery)
+          .sort({ timestamp: -1 })
+          .skip(skip)
+          .limit(limitNum)
+          .lean()
+      ]);
+      
+      if (messages.length > 0) {
+        logInfo(`Found ${messages.length} messages using phone fallback search`);
+      }
+    }
+    
     // Get contact name from the first message
     const contactName = messages.length > 0 
       ? (messages[0].contactName || messages[0].fromName || 'Unknown Contact')
