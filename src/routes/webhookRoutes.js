@@ -109,10 +109,10 @@ router.post('/incoming', async (req, res) => {
       await Message.updateOne({ messageSid: MessageSid }, { $set: { status: 'received' } });
     }
 
-    res.sendStatus(200);
+    res.sendStatus(204).end();
   } catch (error) {
     logError('Error processing incoming webhook:', error);
-    res.sendStatus(500);
+    res.sendStatus(204).end();
   }
 });
 
@@ -153,10 +153,10 @@ router.post('/status', async (req, res) => {
       logInfo(`Status update for untracked MessageSid: ${MessageSid} (Status: ${MessageStatus})`);
     }
 
-    res.sendStatus(200); // Acknowledge the webhook
+    res.sendStatus(204).end(); // Acknowledge the webhook
   } catch (error) {
     logError('Error processing status webhook:', error);
-    res.sendStatus(500); // Ensure Twilio retries on failure
+    res.sendStatus(204).end(); // Ensure Twilio retries on failure
   }
 });
 
