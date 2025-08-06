@@ -208,6 +208,16 @@ const updateMessageStatus = async (messageId, updateData) => {
 };
 
 /**
+ * Helper to strip whatsapp: prefix
+ * @param {string} number - The phone number to strip.
+ * @returns {string} - The phone number with the whatsapp: prefix removed.
+ */
+function stripWhatsappPrefix(number) {
+  if (!number) return number;
+  return number.replace(/^whatsapp:/, '');
+}
+
+/**
  * POST /send-message
  * Send WhatsApp message (text or media)
  * 
@@ -290,8 +300,8 @@ router.post('/send-message', async (req, res) => {
       mediaUrl: validMediaUrls,
       direction: 'outbound',
       status: 'queued',
-      from: fromNumber,
-      to: formattedTo,
+      from: stripWhatsappPrefix(fromNumber),
+      to: stripWhatsappPrefix(formattedTo),
       messageType: validMediaUrls.length > 0 ? 'media' : 'text'
     };
 
@@ -303,8 +313,8 @@ router.post('/send-message', async (req, res) => {
 
     // Prepare Twilio message options
     const messageOptions = {
-      from: fromNumber,
-      to: formattedTo,
+      from: stripWhatsappPrefix(fromNumber),
+      to: stripWhatsappPrefix(formattedTo),
       statusCallback: statusCallbackUrl
     };
 
@@ -409,8 +419,8 @@ router.post('/send-template', async (req, res) => {
       fromName,
       direction: 'outbound',
       status: 'queued',
-      from: fromNumber,
-      to: formattedTo,
+      from: stripWhatsappPrefix(fromNumber),
+      to: stripWhatsappPrefix(formattedTo),
       messageType: 'template'
     });
     await newMessage.save();
@@ -430,8 +440,8 @@ router.post('/send-template', async (req, res) => {
     }
 
     const messageOptions = {
-      from: fromNumber,
-      to: formattedTo,
+      from: stripWhatsappPrefix(fromNumber),
+      to: stripWhatsappPrefix(formattedTo),
       contentSid,
       contentVariables: JSON.stringify(contentVars),
       statusCallback: statusCallbackUrl
