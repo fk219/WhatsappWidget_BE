@@ -313,8 +313,8 @@ router.post('/send-message', async (req, res) => {
 
     // Prepare Twilio message options
     const messageOptions = {
-      from: stripWhatsappPrefix(fromNumber),
-      to: stripWhatsappPrefix(formattedTo),
+      from: fromNumber, // Keep whatsapp: prefix for Twilio API
+      to: formattedTo,  // Keep whatsapp: prefix for Twilio API
       statusCallback: statusCallbackUrl
     };
 
