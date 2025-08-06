@@ -5,6 +5,22 @@ import { logInfo, logError } from '../utils/logger.js';
 
 const router = express.Router();
 
+// Helper function to look up Salesforce ContactId by WhatsApp number
+async function lookupContactIdByPhone(phone) {
+  // Try to find the most recent outbound message to this phone
+  const outbound = await Message.findOne({ to: { $regex: phone.replace('+', ''), $options: 'i' }, direction: 'outbound' }).sort({ timestamp: -1 });
+  if (outbound && outbound.contactId && outbound.contactId.startsWith('003')) {
+    return outbound.contactId;
+  }
+  // Try to find the most recent inbound message from this phone with a Salesforce contactId
+  const inbound = await Message.findOne({ from: { $regex: phone.replace('+', ''), $options: 'i' }, direction: 'inbound', contactId: { $regex: '^003' } }).sort({ timestamp: -1 });
+  if (inbound && inbound.contactId && inbound.contactId.startsWith('003')) {
+    return inbound.contactId;
+  }
+  // Not found
+  return null;
+}
+
 router.post('/incoming', async (req, res) => {
   try {
     logInfo('Processing incoming message webhook', { body: req.body });
@@ -20,20 +36,29 @@ router.post('/incoming', async (req, res) => {
     const cleanTo = To.replace('whatsapp:', '');
     const contactName = ProfileName || cleanFrom;
 
+    // Lookup Salesforce ContactId by WhatsApp number
+    let salesforceContactId = await lookupContactIdByPhone(cleanFrom);
+    if (!salesforceContactId) {
+      logError('No Salesforce ContactId found for incoming WhatsApp number', { cleanFrom });
+      // Optionally, you could create a placeholder or skip saving
+      // For now, fallback to using the phone number as contactId
+      salesforceContactId = cleanFrom;
+    }
+
     let message = await Message.findOne({ messageSid: MessageSid });
     if (!message) {
       const now = new Date();
       message = new Message({
         messageSid: MessageSid,
-        contactId: cleanFrom,
+        contactId: salesforceContactId,
         contactName,
         fromName: contactName || 'Unknown',
         message: Body,
         direction: 'inbound',
         status: 'received',
         isRead: false,
-        from: From,
-        to: To,
+        from: cleanFrom,
+        to: cleanTo,
         timestamp: now,
         deliveredAt: now,
         mediaUrl: []
