@@ -7,17 +7,48 @@ const router = express.Router();
 
 // Helper function to look up Salesforce ContactId by WhatsApp number
 async function lookupContactIdByPhone(phone) {
+  // Clean the phone number for consistent matching
+  const cleanPhone = phone.replace(/[^\d]/g, '');
+  
   // Try to find the most recent outbound message to this phone
-  const outbound = await Message.findOne({ to: { $regex: phone.replace('+', ''), $options: 'i' }, direction: 'outbound' }).sort({ timestamp: -1 });
+  const outbound = await Message.findOne({ 
+    to: { $regex: cleanPhone, $options: 'i' }, 
+    direction: 'outbound',
+    contactId: { $regex: '^003' } // Ensure it's a Salesforce Contact ID
+  }).sort({ timestamp: -1 });
+  
   if (outbound && outbound.contactId && outbound.contactId.startsWith('003')) {
+    logInfo(`Found Salesforce ContactId from outbound message: ${outbound.contactId} for phone: ${phone}`);
     return outbound.contactId;
   }
+  
   // Try to find the most recent inbound message from this phone with a Salesforce contactId
-  const inbound = await Message.findOne({ from: { $regex: phone.replace('+', ''), $options: 'i' }, direction: 'inbound', contactId: { $regex: '^003' } }).sort({ timestamp: -1 });
+  const inbound = await Message.findOne({ 
+    from: { $regex: cleanPhone, $options: 'i' }, 
+    direction: 'inbound', 
+    contactId: { $regex: '^003' } 
+  }).sort({ timestamp: -1 });
+  
   if (inbound && inbound.contactId && inbound.contactId.startsWith('003')) {
+    logInfo(`Found Salesforce ContactId from inbound message: ${inbound.contactId} for phone: ${phone}`);
     return inbound.contactId;
   }
-  // Not found
+  
+  // Try broader search - any message with this phone number that has a Salesforce Contact ID
+  const anyMessage = await Message.findOne({
+    $or: [
+      { from: { $regex: cleanPhone, $options: 'i' } },
+      { to: { $regex: cleanPhone, $options: 'i' } }
+    ],
+    contactId: { $regex: '^003' }
+  }).sort({ timestamp: -1 });
+  
+  if (anyMessage && anyMessage.contactId && anyMessage.contactId.startsWith('003')) {
+    logInfo(`Found Salesforce ContactId from any message: ${anyMessage.contactId} for phone: ${phone}`);
+    return anyMessage.contactId;
+  }
+  
+  logError(`No Salesforce ContactId found for phone: ${phone}`);
   return null;
 }
 
