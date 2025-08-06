@@ -148,7 +148,9 @@ router.post('/status', async (req, res) => {
     if (result.matchedCount > 0) {
       logInfo(`Message updated successfully: ${MessageSid}`);
     } else {
-      logError(`No message found for MessageSid: ${MessageSid}`);
+      // Don't log as error for status updates of messages we don't track
+      // This is normal for messages sent outside our system
+      logInfo(`Status update for untracked MessageSid: ${MessageSid} (Status: ${MessageStatus})`);
     }
 
     res.sendStatus(200); // Acknowledge the webhook
